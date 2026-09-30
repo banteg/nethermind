@@ -13,43 +13,160 @@ public class ParityVmOperationTraceConverter : JsonConverter<ParityVmOperationTr
     public override ParityVmOperationTrace Read(
         ref Utf8JsonReader reader,
         Type typeToConvert,
-        JsonSerializerOptions options)
+        JsonSerializerOptions options) => ReadOperation(ref reader, options);
+
+    internal static ParityVmOperationTrace ReadOperation(ref Utf8JsonReader reader, JsonSerializerOptions options)
     {
-        using JsonDocument document = JsonDocument.ParseValue(ref reader);
-        JsonElement value = document.RootElement;
-        if (value.ValueKind != JsonValueKind.Object) throw new JsonException();
-        JsonElement execution = value.GetProperty("ex");
-        ParityVmOperationTrace operation = new()
+        if (reader.TokenType != JsonTokenType.StartObject)
         {
-            Cost = value.GetProperty("cost").GetUInt64(),
-            Pc = value.GetProperty("pc").GetInt32(),
-            Sub = value.GetProperty("sub").Deserialize<ParityVmTrace>(options),
-            Halted = execution.ValueKind == JsonValueKind.Null,
-        };
-        if (!operation.Halted)
-        {
-            JsonElement memory = execution.GetProperty("mem");
-            if (memory.ValueKind != JsonValueKind.Null)
-            {
-                operation.Memory = new ParityMemoryChangeTrace
-                {
-                    Data = memory.GetProperty("data").Deserialize<byte[]>(options)!,
-                    Offset = memory.GetProperty("off").GetInt64(),
-                };
-            }
-            operation.Push = execution.GetProperty("push").Deserialize<byte[][]>(options);
-            JsonElement store = execution.GetProperty("store");
-            if (store.ValueKind != JsonValueKind.Null)
-            {
-                operation.Store = new ParityStorageChangeTrace
-                {
-                    Key = store.GetProperty("key").Deserialize<byte[]>(options)!,
-                    Value = store.GetProperty("val").Deserialize<byte[]>(options)!,
-                };
-            }
-            operation.Used = execution.GetProperty("used").GetUInt64();
+            throw new JsonException($"Cannot deserialize {nameof(ParityVmOperationTrace)}.");
         }
-        return operation;
+
+        ParityVmOperationTrace value = new();
+
+        reader.Read();
+        while (reader.TokenType != JsonTokenType.EndObject)
+        {
+            if (reader.ValueTextEquals("cost"u8))
+            {
+                reader.Read();
+                value.Cost = reader.GetUInt64();
+            }
+            else if (reader.ValueTextEquals("ex"u8))
+            {
+                reader.Read();
+                ReadExecuted(ref reader, value, options);
+            }
+            else if (reader.ValueTextEquals("pc"u8))
+            {
+                reader.Read();
+                value.Pc = reader.GetInt32();
+            }
+            else if (reader.ValueTextEquals("sub"u8))
+            {
+                reader.Read();
+                value.Sub = reader.TokenType == JsonTokenType.Null ? null : ParityVmTraceConverter.ReadTrace(ref reader, options);
+            }
+            else
+            {
+                throw new JsonException($"Cannot deserialize {nameof(ParityVmOperationTrace)}.");
+            }
+
+            reader.Read();
+        }
+
+        return value;
+    }
+
+    private static void ReadExecuted(ref Utf8JsonReader reader, ParityVmOperationTrace value, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+        {
+            value.Halted = true;
+            return;
+        }
+
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            throw new JsonException($"Cannot deserialize {nameof(ParityVmOperationTrace)}.");
+        }
+
+        reader.Read();
+        while (reader.TokenType != JsonTokenType.EndObject)
+        {
+            if (reader.ValueTextEquals("mem"u8))
+            {
+                reader.Read();
+                value.Memory = reader.TokenType == JsonTokenType.Null ? null : ReadMemory(ref reader, options);
+            }
+            else if (reader.ValueTextEquals("push"u8))
+            {
+                reader.Read();
+                value.Push = JsonSerializer.Deserialize<byte[][]>(ref reader, options);
+            }
+            else if (reader.ValueTextEquals("store"u8))
+            {
+                reader.Read();
+                value.Store = reader.TokenType == JsonTokenType.Null ? null : ReadStore(ref reader, options);
+            }
+            else if (reader.ValueTextEquals("used"u8))
+            {
+                reader.Read();
+                value.Used = reader.GetUInt64();
+            }
+            else
+            {
+                throw new JsonException($"Cannot deserialize {nameof(ParityVmOperationTrace)}.");
+            }
+
+            reader.Read();
+        }
+    }
+
+    private static ParityMemoryChangeTrace ReadMemory(ref Utf8JsonReader reader, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            throw new JsonException($"Cannot deserialize {nameof(ParityMemoryChangeTrace)}.");
+        }
+
+        ParityMemoryChangeTrace memory = new();
+
+        reader.Read();
+        while (reader.TokenType != JsonTokenType.EndObject)
+        {
+            if (reader.ValueTextEquals("data"u8))
+            {
+                reader.Read();
+                memory.Data = JsonSerializer.Deserialize<byte[]>(ref reader, options);
+            }
+            else if (reader.ValueTextEquals("off"u8))
+            {
+                reader.Read();
+                memory.Offset = reader.GetInt64();
+            }
+            else
+            {
+                throw new JsonException($"Cannot deserialize {nameof(ParityMemoryChangeTrace)}.");
+            }
+
+            reader.Read();
+        }
+
+        return memory;
+    }
+
+    private static ParityStorageChangeTrace ReadStore(ref Utf8JsonReader reader, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            throw new JsonException($"Cannot deserialize {nameof(ParityStorageChangeTrace)}.");
+        }
+
+        ParityStorageChangeTrace store = new();
+
+        reader.Read();
+        while (reader.TokenType != JsonTokenType.EndObject)
+        {
+            if (reader.ValueTextEquals("key"u8))
+            {
+                reader.Read();
+                store.Key = JsonSerializer.Deserialize<byte[]>(ref reader, options);
+            }
+            else if (reader.ValueTextEquals("val"u8))
+            {
+                reader.Read();
+                store.Value = JsonSerializer.Deserialize<byte[]>(ref reader, options);
+            }
+            else
+            {
+                throw new JsonException($"Cannot deserialize {nameof(ParityStorageChangeTrace)}.");
+            }
+
+            reader.Read();
+        }
+
+        return store;
     }
 
     public override void Write(
